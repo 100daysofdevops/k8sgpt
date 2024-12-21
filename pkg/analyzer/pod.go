@@ -14,7 +14,9 @@ limitations under the License.
 package analyzer
 
 import (
+	"context"
 	"fmt"
+	"strings"
 
 	"github.com/k8sgpt-ai/k8sgpt/pkg/common"
 	"github.com/k8sgpt-ai/k8sgpt/pkg/util"
@@ -169,4 +171,66 @@ func isEvtErrorReason(reason string) bool {
 		}
 	}
 	return false
+}
+
+func (p PodAnalyzer) GetFixedYAML(result *common.Result, aiProvider common.IAI, ctx context.Context) (string, error) {
+	// Build error context
+	var errorMsgs []string
+	errorComponents := make(map[string]bool)
+
+	for _, failure := range result.Error {
+		errorMsgs = append(errorMsgs, fmt.Sprintf("- %s", failure.Text))
+
+		// Identify affected components
+		switch {
+		case strings.Contains(failure.Text, "image"):
+			errorComponents["image"] = true
+		case strings.Contains(failure.Text, "ConfigMap"):
+			errorComponents["configmap"] = true
+		case strings.Contains(failure.Text, "probe"):
+			errorComponents["healthcheck"] = true
+		case strings.Contains(failure.Text, "OOMKilled"):
+			errorComponents["resources"] = true
+		}
+	}
+
+	// Build the prompt
+	prompt := fmt.Sprintf(`Given a Kubernetes Pod with issues:
+Pod Name: %s
+Issues Found:
+%s
+
+Please provide a corrected Pod YAML that:
+1. ONLY contains the YAML manifest
+2. Starts with 'apiVersion: v1'
+3. Uses kind: Pod
+4. Keeps the pod name: %s
+5. Fixes all identified issues`,
+		result.Name,
+		strings.Join(errorMsgs, "\n"),
+		strings.TrimPrefix(result.Name, "default/"))
+
+	// Add component-specific guidance if needed
+	if len(errorComponents) > 0 {
+		prompt += "\n\nPay special attention to:"
+		if errorComponents["image"] {
+			prompt += "\n- Image references and pull policies"
+		}
+		if errorComponents["configmap"] {
+			prompt += "\n- ConfigMap references and mounting"
+		}
+		if errorComponents["healthcheck"] {
+			prompt += "\n- Health check probe configuration"
+		}
+		if errorComponents["resources"] {
+			prompt += "\n- Resource limits and requests"
+		}
+	}
+
+	fixedYAML, err := aiProvider.GetCompletion(ctx, prompt)
+	if err != nil {
+		return "", err
+	}
+
+	return strings.TrimSpace(fixedYAML), nil
 }

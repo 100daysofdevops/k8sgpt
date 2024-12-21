@@ -79,6 +79,8 @@ type Result struct {
 	Error        []Failure `json:"error"`
 	Details      string    `json:"details"`
 	ParentObject string    `json:"parentObject"`
+	Explanation  string    `json:"explanation,omitempty"`
+	FixedYAML    string    `json:"fixedYaml,omitempty"`
 }
 
 type AnalysisStats struct {
@@ -95,4 +97,12 @@ type Failure struct {
 type Sensitive struct {
 	Unmasked string
 	Masked   string
+}
+
+type IAI interface {
+	// GetCompletion returns an AI-generated completion for the given prompt
+	GetCompletion(ctx context.Context, prompt string) (string, error)
+
+	// GetExplanation returns an AI-generated explanation for the given prompt
+	GetExplanation(prompt string) (string, error)
 }

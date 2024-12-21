@@ -23,6 +23,7 @@ import (
 	"github.com/k8sgpt-ai/k8sgpt/pkg/ai/interactive"
 	"github.com/k8sgpt-ai/k8sgpt/pkg/analysis"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
 
 var (
@@ -41,6 +42,7 @@ var (
 	customAnalysis  bool
 	customHeaders   []string
 	withStats       bool
+	fix				bool
 )
 
 // AnalyzeCmd represents the problems command
@@ -51,6 +53,13 @@ var AnalyzeCmd = &cobra.Command{
 	Long: `This command will find problems within your Kubernetes cluster and
 	provide you with a list of issues that need to be resolved`,
 	Run: func(cmd *cobra.Command, args []string) {
+		// Setting up fix flag
+		viper.Set("fix", fix)
+
+		if fix && !explain {
+			fmt.Printf("Warning: --fix requires --explain flag to work\n")
+			os.Exit(1)
+		}
 		// Create analysis configuration first.
 		config, err := analysis.NewAnalysis(
 			backend,
@@ -156,4 +165,6 @@ func init() {
 	AnalyzeCmd.Flags().StringVarP(&labelSelector, "selector", "L", "", "Label selector (label query) to filter on, supports '=', '==', and '!='. (e.g. -L key1=value1,key2=value2). Matching objects must satisfy all of the specified label constraints.")
 	// print stats
 	AnalyzeCmd.Flags().BoolVarP(&withStats, "with-stat", "s", false, "Print analysis stats. This option disables errors display.")
+	// fix flags
+	AnalyzeCmd.Flags().BoolVarP(&fix, "fix", "x", false, "Output yaml file with fixes")
 }

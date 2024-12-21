@@ -18,6 +18,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -161,6 +162,9 @@ func NewAnalysis(
 	}
 	a.AIClient = aiClient
 	a.AnalysisAIProvider = aiProvider.Name
+	//Setting and returning the fix configuration for analysis
+	fix := viper.GetBool("fix")
+	viper.Set("fix", fix)
 	return a, nil
 }
 
@@ -317,9 +321,56 @@ func (a *Analysis) executeAnalyzer(analyzer common.IAnalyzer, filter string, ana
 		if a.WithStats {
 			a.Stats = append(a.Stats, stat)
 		}
+		if viper.GetBool("fix") && a.Explain {
+			for i := range results {
+				if strings.Contains(results[i].Kind, "Pod") {
+					fmt.Printf("Getting fix for Pod %s...\n", results[i].Name)
+					fixedYAML, err := a.getFixedYAML(&results[i])
+					if err != nil {
+						fmt.Printf("Error getting fix: %v\n", err)
+						continue
+					}
+					results[i].FixedYAML = fixedYAML
+
+					// Fixed file without namespace
+					filename := fmt.Sprintf("fixed-%s-%s.yaml", results[i].Kind, strings.ReplaceAll(results[i].Name, "/", "-"))
+					if err := os.WriteFile(filename, []byte(fixedYAML), 0644); err != nil {
+						fmt.Printf("There is an error saving the fix: %v\n", err)
+					} else {
+						fmt.Printf("Fixed yaml saved to: %s\n", filename)
+					}
+				}
+			}
+		}
 		a.Results = append(a.Results, results...)
 	}
 	<-semaphore
+}
+
+func (a *Analysis) getFixedYAML(result *common.Result) (string, error) {
+	if a.AIClient == nil {
+		return "", fmt.Errorf("AI provider not intialized")
+	}
+
+	var errorMsgs []string
+	for _, failure := range result.Error {
+		errorMsgs = append(errorMsgs, failure.Text)
+	}
+	errorText := strings.Join(errorMsgs, "\n")
+
+	prompt := fmt.Sprintf(`Given the following Kubernetes Pod error:
+Error: %s
+Resource Name: %s
+
+Please provide a correct Kubernetes YAML manifest that has the fix for this issue.
+The response should ONLY contain the YAML manifest, starting with 'apiVersion:'.`,
+		errorText, result.Name)
+	fixedYAML, err := a.AIClient.GetCompletion(a.Context, prompt)
+	if err != nil {
+		return "", err
+	}
+
+	return strings.TrimSpace(fixedYAML), nil
 }
 
 func (a *Analysis) GetAIResults(output string, anonymize bool) error {
